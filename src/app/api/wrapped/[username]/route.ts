@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { Octokit } from "@octokit/rest";
+import { createOctokit } from "@/lib/octokit";
+import { fetchUserActivity } from "@/lib/github-events";
+
+const GITHUB_USERNAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
 
 interface RouteParams {
   params: Promise<{ username: string }>;
@@ -8,31 +11,37 @@ interface RouteParams {
 export async function GET(_request: Request, { params }: RouteParams) {
   const { username } = await params;
 
-  try {
-    const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+  if (!GITHUB_USERNAME_RE.test(username)) {
+    return NextResponse.json(
+      { error: "Invalid GitHub username" },
+      { status: 400, headers: { "Cache-Control": "no-store" } }
+    );
+  }
 
-    const [userRes, reposRes] = await Promise.all([
+  try {
+    const octokit = createOctokit();
+
+    const [userRes, reposRes, activity] = await Promise.all([
       octokit.users.getByUsername({ username }),
       octokit.repos.listForUser({ username, sort: "updated", per_page: 100, type: "owner" }),
+      fetchUserActivity(username),
     ]);
 
     const user = userRes.data;
     const repos = reposRes.data.filter((r) => !r.fork);
 
-    // Language stats
     const langMap: Record<string, number> = {};
-    repos.forEach((r) => {
+    for (const r of repos) {
       if (r.language) langMap[r.language] = (langMap[r.language] ?? 0) + 1;
-    });
+    }
     const languages = Object.entries(langMap)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
       .map(([name, count]) => ({ name, count }));
 
-    // Top repos by stars
     const topRepos = [...repos]
       .sort((a, b) => (b.stargazers_count ?? 0) - (a.stargazers_count ?? 0))
-      .slice(0, 5)
+      .slice(0, 3)
       .map((r) => ({
         name: r.name,
         full_name: r.full_name,
@@ -43,29 +52,39 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
     const totalStars = repos.reduce((sum, r) => sum + (r.stargazers_count ?? 0), 0);
 
-    return NextResponse.json({
-      user: {
-        login: user.login,
-        name: user.name ?? user.login,
-        avatar_url: user.avatar_url,
-        bio: user.bio ?? "",
-        public_repos: user.public_repos,
-        followers: user.followers,
-        following: user.following,
-        created_at: user.created_at,
+    return NextResponse.json(
+      {
+        user: {
+          login: user.login,
+          name: user.name ?? user.login,
+          avatar_url: user.avatar_url,
+          bio: user.bio ?? "",
+          public_repos: user.public_repos,
+          followers: user.followers,
+          following: user.following,
+          created_at: user.created_at,
+        },
+        totalStars,
+        totalRepos: repos.length,
+        languages,
+        topRepos,
+        activity,
       },
-      totalStars,
-      totalRepos: repos.length,
-      languages,
-      topRepos,
-    }, {
-      headers: { "Cache-Control": "public, s-maxage=600, stale-while-revalidate=1200" },
-    });
+      {
+        headers: { "Cache-Control": "public, s-maxage=600, stale-while-revalidate=1200" },
+      }
+    );
   } catch (err) {
     const e = err as { status?: number };
+    const status = e.status === 404 ? 404 : e.status === 403 || e.status === 429 ? 429 : 500;
+    const message =
+      status === 404 ? "User not found" :
+      status === 429 ? "GitHub API rate limit reached — try again in a few minutes" :
+      "Something went wrong";
+
     return NextResponse.json(
-      { error: "User not found" },
-      { status: e.status === 404 ? 404 : 500 }
+      { error: message },
+      { status, headers: { "Cache-Control": "no-store" } }
     );
   }
 }
