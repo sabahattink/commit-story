@@ -6,6 +6,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://commitstory.dev"),
   title: "commitstory — Your GitHub, Wrapped",
   description:
     "See your GitHub stats at a glance — commits, stars, languages, top repos. Share your Wrapped card.",
