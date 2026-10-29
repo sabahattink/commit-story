@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Star, Users, Link2, Check } from "lucide-react";
+import { Star, Link2, Check } from "lucide-react";
 import NavHeader from "@/components/NavHeader";
 
 interface WrappedData {

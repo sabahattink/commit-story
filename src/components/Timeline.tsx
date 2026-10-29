@@ -208,7 +208,7 @@ export default function Timeline({ commits, milestones, repoCreatedAt, owner, re
           .attr("fill", "var(--text-tertiary)")
           .attr("font-size", "10px");
       });
-  }, [sortedCommits, milestones, containerWidth]);
+  }, [sortedCommits, milestones, containerWidth, owner, repo]);
 
   if (sortedCommits.length === 0) return null;
 
