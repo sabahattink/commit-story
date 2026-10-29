@@ -1,90 +1,14 @@
 import { Octokit } from "@octokit/rest";
 
-export interface CommitData {
-  sha: string;
-  message: string;
-  author: {
-    name: string;
-    email: string;
-    avatar_url: string;
-    login: string;
-  };
-  date: string;
-  stats: {
-    additions: number;
-    deletions: number;
-    total: number;
-  };
-  files: string[];
-}
+import {
+  calculateStats,
+  detectMilestones,
+  isBot,
+  parseLastPage,
+} from "./commit-analysis";
+import type { CommitData, ContributorData, RepoInfo, RepoStory } from "./types";
 
-export interface RepoInfo {
-  name: string;
-  full_name: string;
-  description: string;
-  stars: number;
-  forks: number;
-  created_at: string;
-  language: string;
-}
-
-export interface RepoStory {
-  repo: RepoInfo;
-  commits: CommitData[];
-  contributors: ContributorData[];
-  milestones: MilestoneData[];
-  stats: RepoStats;
-}
-
-export interface ContributorData {
-  login: string;
-  avatar_url: string;
-  contributions: number;
-  first_commit: string;
-  last_commit: string;
-}
-
-export interface MilestoneData {
-  type: "first-commit" | "release" | "big-refactor" | "contributor-joined" | "100-commits" | "1000-stars";
-  date: string;
-  title: string;
-  description: string;
-  sha?: string;
-}
-
-export interface RepoStats {
-  total_commits: number;       // Real total (from pagination header)
-  commits_shown: number;       // How many are in the commits[] array
-  total_contributors: number;  // Real total (paginated)
-  total_additions: number;
-  total_deletions: number;
-  most_active_day: string;
-  most_active_author: string;
-  avg_commits_per_week: number;
-  project_age_days: number;
-}
-
-// Bot detection — GitHub marks official bots with [bot] suffix
-const BOT_PATTERNS = [
-  "[bot]",
-  "dependabot",
-  "renovate",
-  "github-actions",
-  "codecov",
-  "greenkeeper",
-  "snyk-bot",
-  "allcontributors",
-  "semantic-release",
-  "imgbot",
-  "netlify",
-  "vercel",
-  "stale",
-];
-
-function isBot(login: string): boolean {
-  const lower = login.toLowerCase();
-  return BOT_PATTERNS.some((p) => lower.includes(p));
-}
+export type * from "./types";
 
 export class GitHubClient {
   private octokit: Octokit;
@@ -119,9 +43,8 @@ export class GitHubClient {
         repo,
         per_page: 1,
       });
-      const link = (response.headers as Record<string, string>)["link"] ?? "";
-      const match = link.match(/[?&]page=(\d+)>; rel="last"/);
-      if (match?.[1]) return parseInt(match[1], 10);
+      const lastPage = parseLastPage(response.headers.link);
+      if (lastPage !== null) return lastPage;
       // No pagination link = only 1 page of results
       return response.data.length;
     } catch (err) {
@@ -207,8 +130,14 @@ export class GitHubClient {
     ]);
 
     const realTotal = Math.max(totalCommits, commits.length);
-    const milestones = this.detectMilestones(commits, contributors, repoInfo, realTotal);
-    const stats = this.calculateStats(commits, contributors, repoInfo, realTotal);
+    const milestones = detectMilestones(commits, realTotal);
+    const stats = calculateStats({
+      commits,
+      contributors,
+      repo: repoInfo,
+      totalCommits: realTotal,
+      now: Date.now(),
+    });
 
     return {
       repo: repoInfo,
@@ -216,97 +145,6 @@ export class GitHubClient {
       contributors,
       milestones,
       stats,
-    };
-  }
-
-  private detectMilestones(
-    commits: CommitData[],
-    contributors: ContributorData[],
-    repo: RepoInfo,
-    totalCommits: number
-  ): MilestoneData[] {
-    const milestones: MilestoneData[] = [];
-
-    // First commit in the displayed window
-    if (commits.length > 0) {
-      const firstCommit = commits[commits.length - 1];
-      milestones.push({
-        type: "first-commit",
-        date: firstCommit.date,
-        title: "First Commit",
-        description: `${firstCommit.author.name} started the project`,
-        sha: firstCommit.sha,
-      });
-    }
-
-    // 100-commits milestone
-    if (totalCommits >= 100) {
-      // Use the oldest commit in our window as proxy date
-      const proxy = commits[commits.length - 1];
-      if (proxy) {
-        milestones.push({
-          type: "100-commits",
-          date: proxy.date,
-          title: "100 Commits!",
-          description: "Project reached 100 commits",
-        });
-      }
-    }
-
-    // Release commits detection
-    commits.forEach((commit) => {
-      if (commit.message.match(/^(v?\d+\.\d+\.\d+|release|bump version)/i)) {
-        milestones.push({
-          type: "release",
-          date: commit.date,
-          title: commit.message.split("\n")[0].slice(0, 60),
-          description: "New version released",
-          sha: commit.sha,
-        });
-      }
-    });
-
-    return milestones.sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-  }
-
-  private calculateStats(
-    commits: CommitData[],
-    contributors: ContributorData[],
-    repo: RepoInfo,
-    totalCommits: number
-  ): RepoStats {
-    const projectAgeDays = Math.max(
-      1,
-      Math.floor((Date.now() - new Date(repo.created_at).getTime()) / (1000 * 60 * 60 * 24))
-    );
-
-    // Most active day of week (from latest 100 commits sample)
-    const dayCount: Record<string, number> = {};
-    commits.forEach((c) => {
-      const day = new Date(c.date).toLocaleDateString("en-US", { weekday: "long" });
-      dayCount[day] = (dayCount[day] || 0) + 1;
-    });
-    const mostActiveDay =
-      Object.entries(dayCount).sort((a, b) => b[1] - a[1])[0]?.[0] || "Unknown";
-
-    // Most active human author from contributors list (already bot-filtered)
-    const mostActiveAuthor = contributors[0]?.login || "Unknown";
-
-    // Weekly average using real total
-    const avgPerWeek = parseFloat(((totalCommits / projectAgeDays) * 7).toFixed(1));
-
-    return {
-      total_commits: totalCommits,
-      commits_shown: commits.length,
-      total_contributors: contributors.length,
-      total_additions: commits.reduce((sum, c) => sum + c.stats.additions, 0),
-      total_deletions: commits.reduce((sum, c) => sum + c.stats.deletions, 0),
-      most_active_day: mostActiveDay,
-      most_active_author: mostActiveAuthor,
-      avg_commits_per_week: avgPerWeek,
-      project_age_days: projectAgeDays,
     };
   }
 }

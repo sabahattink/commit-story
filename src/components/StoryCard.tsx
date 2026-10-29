@@ -5,6 +5,7 @@ import Image from "next/image";
 import { formatDistanceToNow } from "date-fns";
 import { Copy, Check } from "lucide-react";
 import type { CommitData } from "@/lib/github";
+import { getCommitType } from "@/lib/commit-analysis";
 
 interface StoryCardProps {
   commit: CommitData;
@@ -25,9 +26,8 @@ const COMMIT_TYPES: Record<string, { color: string; label: string }> = {
 };
 
 function parseCommitType(message: string) {
-  const match = message.match(/^(\w+)(\(.+\))?!?:\s/);
-  if (match?.[1]) return COMMIT_TYPES[match[1]] ?? null;
-  return null;
+  const type = getCommitType(message);
+  return type ? (COMMIT_TYPES[type] ?? null) : null;
 }
 
 const AVATAR_PLACEHOLDER_COLORS = [

@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { CommitData } from "@/lib/github";
+import { getCommitType } from "@/lib/commit-analysis";
 import StoryCard from "./StoryCard";
 
 interface CommitListProps {
@@ -25,11 +26,6 @@ const FILTER_TYPES = [
 ] as const;
 
 type FilterType = (typeof FILTER_TYPES)[number]["id"];
-
-function getCommitType(message: string): string | null {
-  const match = message.match(/^(\w+)(\(.+\))?!?:\s/);
-  return match?.[1] ?? null;
-}
 
 export default function CommitList({ commits, totalCommits }: CommitListProps) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);

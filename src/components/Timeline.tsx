@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import type { CommitData, MilestoneData } from "@/lib/github";
+import { getCommitType } from "@/lib/commit-analysis";
 
 interface TimelineProps {
   commits: CommitData[];
@@ -43,8 +44,7 @@ const COMMIT_TYPE_COLORS: Record<string, string> = {
 };
 
 function getCommitTypeColor(message: string): string | null {
-  const match = message.match(/^(\w+)(\(.+\))?!?:\s/);
-  const type = match?.[1];
+  const type = getCommitType(message);
   return type ? (COMMIT_TYPE_COLORS[type] ?? null) : null;
 }
 
@@ -268,13 +268,13 @@ export default function Timeline({ commits, milestones, repoCreatedAt, owner, re
               </span>
               {(() => {
                 const color = getCommitTypeColor(tooltip.commit.message);
-                const match = tooltip.commit.message.match(/^(\w+)(\(.+\))?!?:\s/);
-                return color && match?.[1] ? (
+                const type = getCommitType(tooltip.commit.message);
+                return color && type ? (
                   <span
                     className="text-xs font-mono px-1.5 py-0.5 rounded"
                     style={{ color, background: `${color}15` }}
                   >
-                    {match[1]}
+                    {type}
                   </span>
                 ) : null;
               })()}
